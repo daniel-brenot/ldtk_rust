@@ -67,7 +67,9 @@ impl Project {
         Ok(o)
     }
 
-    pub fn from_buf(b: BufReader<File>) -> Result<Self, LDTKError> {
+    pub fn from_buf<R>(b: BufReader<File>) -> Result<Self, LDTKError>
+        where R: Read
+    {
         let o: Project = serde_json::from_reader(b)?;
         Ok(o)
     }
