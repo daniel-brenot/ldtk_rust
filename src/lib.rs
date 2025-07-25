@@ -12,52 +12,85 @@
 //! Level::new(f: Path) --- loads a single external level file
 //! ```
 
-mod json_1_5_3;
+mod json;
 
-pub use json_1_5_3::*;
+pub use json::*;
+use thiserror::Error;
 use std::{
-    fs::File,
-    path::{Path, PathBuf}, io::BufReader,
+    fs::File, io::{self, BufReader, Read}, path::{Path, PathBuf}
 };
+
+/// This loader just loads the file from the filesystem.
+fn default_loader<P: AsRef<Path>>(path: P) -> io::Result<Box<dyn Read>> {
+    let file = File::open(path)?;
+    Ok(Box::new(BufReader::new(file)))
+}
+
+type Loader = fn(f: PathBuf) -> io::Result<Box<dyn Read>>;
+
+#[derive(Error, Debug)]
+pub enum LDTKError {
+    #[error("JSON error: {0}")]
+    JSONError(#[from] serde_json::Error),
+    #[error("IO error: {0}")]
+    IOError(#[from] io::Error),
+    #[error("External level name not found")]
+    ExternalLevelNameNotFoundError,
+    #[error("Failed to coerce path to string")]
+    PathToStringError(),
+
+}
 
 // this struct name has to match the auto-generated top-level struct.
 // Currently mirroring the LDTK Haxe API as best I can figure out.
 impl Project {
-    pub fn new<P: AsRef<Path>>(f: P) -> Self {
-        let mut o = Project::load_project(&f);
+    pub fn new<P: AsRef<Path>>(f: P) -> Result<Self, LDTKError> {
+        Project::new_with_loader(f, default_loader)
+    }
+
+    pub fn new_with_loader<P: AsRef<Path>>(f: P, loader: Loader ) -> Result<Self, LDTKError> {
+        let mut o = Project::load_project_with_loader(&f, loader)?;
         if o.external_levels {
-            o.load_external_levels(f);
+            o.load_external_levels_with_loader(f, loader)?;
         }
-        o
+        Ok(o)
     }
 
-    // Read in an LDTK project file
-    pub fn load_project<P: AsRef<Path>>(f: P) -> Self {
-        //let file = File::open(f).expect("project file not found");
-        let file = BufReader::new(File::open(f).expect("project file not found"));
-        let o: Project = serde_json::from_reader(file).expect("error while reading");
-        o
+    /// Read in an LDTK project file
+    pub fn load_project<P: AsRef<Path>>(f: P) -> Result<Self, LDTKError> {
+        Project::load_project_with_loader(f, default_loader)
     }
 
-    pub fn from_buf(b: BufReader<File>) -> Self {
-        let o: Project = serde_json::from_reader(b).expect("error while reading");
-        o
+    pub fn load_project_with_loader<P: AsRef<Path>>(f: P, loader: Loader) -> Result<Self, LDTKError> {
+        let file = loader(f.as_ref().into())?;
+        let o: Project = serde_json::from_reader(file)?;
+        Ok(o)
     }
 
-    pub fn from_slice(b: &[u8]) -> Self {
-        let o: Project = serde_json::from_slice(b).expect("error while reading");
-        o
+    pub fn from_buf(b: BufReader<File>) -> Result<Self, LDTKError> {
+        let o: Project = serde_json::from_reader(b)?;
+        Ok(o)
     }
 
-    // Remove any items in the project.levels Vec ... useful when you
-    // get external file info and want to replace the items with more
-    // complete data extrated from the files.
+    pub fn from_slice(b: &[u8]) -> Result<Self, LDTKError> {
+        let o: Project = serde_json::from_slice(b)?;
+        Ok(o)
+    }
+
+    /// Remove any items in the project.levels Vec ... useful when you
+    /// get external file info and want to replace the items with more
+    /// complete data extrated from the files.
     pub fn clear_levels(&mut self) {
         self.levels = Vec::new();
     }
 
-    // Read in ALL the external level files referred to in an LDTK Project
-    pub fn load_external_levels<P: AsRef<Path>>(&mut self, f: P) {
+    /// Read in ALL the external level files referred to in an LDTK Project
+    pub fn load_external_levels<P: AsRef<Path>>(&mut self, f: P) -> Result<(), LDTKError> {
+        self.load_external_levels_with_loader(f, default_loader)
+    }
+
+    /// Read in ALL the external level files referred to in an LDTK Project
+    pub fn load_external_levels_with_loader<P: AsRef<Path>>(&mut self, f: P, loader: Loader) -> Result<(), LDTKError> {
         // check to make sure there ARE separate levels
         // if not, then likely the call to this method
         // should do nothing because you already have
@@ -66,7 +99,7 @@ impl Project {
             // get all the file names
             let mut all_level_files: Vec<PathBuf> = Vec::new();
             for level in self.levels.iter_mut() {
-                let level_file_path = level.external_rel_path.as_ref().expect("missing level");
+                let level_file_path = level.external_rel_path.as_ref().ok_or(LDTKError::ExternalLevelNameNotFoundError)?;
                 all_level_files.push(level_file_path.into());
             }
 
@@ -76,17 +109,20 @@ impl Project {
             // now add each of them to our struct
             for file in all_level_files.iter() {
                 let mut full_path = PathBuf::new();
-                let parent = f.as_ref().parent().unwrap().to_str().unwrap();
-                // println!("parent: {:#?}", parent);
-                let mf = file.to_str().unwrap();
+                let parent = f
+                    .as_ref()
+                    .parent()
+                    .ok_or(LDTKError::PathToStringError())?
+                    .to_str()
+                    .ok_or(LDTKError::PathToStringError())?;
+                let mf = file.to_str()
+                    .ok_or(LDTKError::PathToStringError())?;
                 full_path.push(format!("{parent}/{mf}"));
-                // full_path.push("/");
-                // full_path.push(&file);
-                println!("opening {:#?}", full_path);
-                let level_ldtk = Level::new(full_path);
+                let level_ldtk = Level::new_with_loader(full_path, loader)?;
                 self.levels.push(level_ldtk);
             }
         }
+        Ok(())
     }
 
     pub fn get_level(&self, uid: i64) -> Option<&Level> {
@@ -100,11 +136,16 @@ impl Project {
 }
 
 impl Level {
-    // Read in a single external LDTK level file
-    pub fn new<P: AsRef<Path>>(f: P) -> Self {
-        let file = BufReader::new(File::open(f).expect("level file not found"));
-        let o: Level = serde_json::from_reader(file).expect("error while reading");
-        o
+    /// Read in a single external LDTK level file
+    pub fn new<P: AsRef<Path>>(f: P) -> Result<Self, LDTKError> {
+        Level::new_with_loader(f, default_loader)
+    }
+
+    /// Read in a single external LDTK level file
+    pub fn new_with_loader<P: AsRef<Path>>(f: P, loader: Loader) -> Result<Self, LDTKError> {
+        let file = loader(f.as_ref().into())?;
+        let o: Level = serde_json::from_reader(file)?;
+        Ok(o)
     }
 }
 
@@ -115,7 +156,7 @@ pub struct LdtkJson;
 // some QuickType examples over at LDTK.
 #[allow(deprecated)]
 impl LdtkJson {
-    pub fn new(f: String) -> Project {
+    pub fn new(f: String) -> Result<Project, LDTKError> {
         Project::new(f)
     }
 }
