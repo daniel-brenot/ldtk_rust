@@ -26,7 +26,7 @@ fn default_loader<P: AsRef<Path>>(path: P) -> io::Result<Box<dyn Read>> {
     Ok(Box::new(BufReader::new(file)))
 }
 
-type Loader = fn(f: PathBuf) -> io::Result<Box<dyn Read>>;
+pub type Loader = fn(f: PathBuf) -> io::Result<Box<dyn Read>>;
 
 #[derive(Error, Debug)]
 pub enum LdtkError {
