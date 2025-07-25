@@ -29,7 +29,7 @@ fn default_loader<P: AsRef<Path>>(path: P) -> io::Result<Box<dyn Read>> {
 type Loader = fn(f: PathBuf) -> io::Result<Box<dyn Read>>;
 
 #[derive(Error, Debug)]
-pub enum LDTKError {
+pub enum LdtkError {
     #[error("JSON error: {0}")]
     JSONError(#[from] serde_json::Error),
     #[error("IO error: {0}")]
