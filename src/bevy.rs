@@ -12,7 +12,7 @@ pub struct LdtkPlugin;
 impl Plugin for LdtkPlugin {
     fn build(&self, app: &mut App) {
         app
-            .init_asset::<BlobAsset>()
+            .init_asset::<LevelWrapper>()
             .init_asset::<LdtkMap>()
             .register_asset_loader(LdtkLoader);
     }
@@ -20,22 +20,37 @@ impl Plugin for LdtkPlugin {
 
 
 #[derive(TypePath, Asset)]
-pub struct BlobAsset {
-    pub data: Vec<u8>,
-}
-
-impl Level {
-    pub async fn new_with_context(f: &Path, load_context: &mut bevy::asset::LoadContext<'_>) -> Result<Self, LdtkError> {
-        let asset: LoadedAsset<BlobAsset> = load_context.loader().immediate().load(f).await?;
-        let o: Level = serde_json::from_reader(asset.get().data.as_slice())?;
-        Ok(o)
-    }
-}
+pub struct LevelWrapper(Level);
 
 #[derive(TypePath, Asset)]
 pub struct LdtkMap {
     pub project: crate::Project,
     pub tilesets: HashMap<i64, Handle<Image>>,
+}
+
+pub struct LdtkLevelLoader;
+
+impl AssetLoader for LdtkLevelLoader {
+    type Asset = LevelWrapper;
+    type Settings = ();
+    type Error = LdtkError;
+
+    async fn load(
+        &self,
+        reader: &mut dyn Reader,
+        _settings: &Self::Settings,
+        load_context: &mut bevy::asset::LoadContext<'_>,
+    ) -> Result<Self::Asset, Self::Error> {
+        let mut bytes = Vec::new();
+        reader.read_to_end(&mut bytes).await?;
+        let o: LevelWrapper = LevelWrapper(serde_json::from_reader(bytes.as_slice())?);
+        Ok(o)
+    }
+
+    fn extensions(&self) -> &[&str] {
+        static EXTENSIONS: &[&str] = &["ldtkl"];
+        EXTENSIONS
+    }
 }
 
 pub struct LdtkLoader;
@@ -80,8 +95,8 @@ impl AssetLoader for LdtkLoader {
                 let mf = file.to_str()
                     .ok_or(LdtkError::PathToStringError())?;
                 full_path.push(format!("{parent}/{mf}"));
-                let level_ldtk = crate::Level::new_with_context(&full_path, load_context).await?;
-                project.levels.push(level_ldtk);
+                let level_ldtk: LoadedAsset<LevelWrapper> = load_context.loader().immediate().load(full_path).await?;
+                project.levels.push(level_ldtk.take().0);
             }
         }
         
