@@ -7,7 +7,7 @@ use bevy::{asset::{io::Reader, AssetLoader, AssetPath, LoadedAsset}, platform::c
 use crate::{LdtkError, Level};
 
 #[derive(Default, Clone, Debug)]
-pub struct LdtkPlugin();
+pub struct LdtkPlugin;
 
 impl Plugin for LdtkPlugin {
     fn build(&self, app: &mut App) {
