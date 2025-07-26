@@ -12,9 +12,9 @@ pub struct LdtkPlugin();
 impl Plugin for LdtkPlugin {
     fn build(&self, mut app: &mut App) {
         app
-            .add_asset::<BlobAsset>()
-            .add_asset::<LdtkMap>()
-            .add_asset_loader(LdtkLoader);
+            .init_asset::<BlobAsset>()
+            .init_asset::<LdtkMap>()
+            .register_asset_loader(LdtkLoader);
     }
 }
 
