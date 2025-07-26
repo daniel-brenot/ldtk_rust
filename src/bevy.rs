@@ -14,6 +14,7 @@ impl Plugin for LdtkPlugin {
         app
             .init_asset::<LevelWrapper>()
             .init_asset::<LdtkMap>()
+            .register_asset_loader(LdtkLevelLoader)
             .register_asset_loader(LdtkLoader);
     }
 }
