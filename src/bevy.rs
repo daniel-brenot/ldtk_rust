@@ -2,7 +2,7 @@
 
 use std::path::{Path, PathBuf};
 
-use bevy::{asset::{io::Reader, Asset, AssetLoader, AssetPath, Handle, LoadedAsset}, image::Image, platform::collections::HashMap, reflect::TypePath};
+use bevy::{asset::{io::Reader, AssetLoader, AssetPath, LoadedAsset}, platform::collections::HashMap, prelude::*};
 
 use crate::{LdtkError, Level};
 
@@ -10,7 +10,7 @@ use crate::{LdtkError, Level};
 pub struct LdtkPlugin();
 
 impl Plugin for LdtkPlugin {
-    fn build(&self, mut app: &mut App) {
+    fn build(&self, app: &mut App) {
         app
             .init_asset::<BlobAsset>()
             .init_asset::<LdtkMap>()
