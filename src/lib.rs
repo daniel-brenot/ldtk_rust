@@ -14,16 +14,20 @@
 
 mod json;
 
+#[cfg(feature = "bevy")]
+pub mod bevy;
+
+#[cfg(feature = "bevy")]
+use ::bevy::asset::LoadDirectError;
+
 pub use json::*;
 use thiserror::Error;
-use std::{
-    fs::File, io::{self, BufReader, Read}, path::{Path, PathBuf}, pin::Pin
-};
+use std::{fs::File, io::{self, BufReader, Read}, path::{Path, PathBuf}, pin::Pin};
 
 /// This loader just loads the file from the filesystem.
 fn default_loader<P: AsRef<Path>>(path: P) -> io::Result<Box<dyn Read>> {
     let file = File::open(path)?;
-    Ok(Box::new(BufReader::new(file)))
+    Ok::<Box<dyn Read>, io::Error>(Box::new(BufReader::new(file)))
 }
 
 pub type Loader = fn(f: PathBuf) -> io::Result<Box<dyn Read>>;
@@ -40,45 +44,25 @@ pub enum LdtkError {
     ExternalLevelNameNotFoundError,
     #[error("Failed to coerce path to string")]
     PathToStringError(),
-
+    #[cfg(feature = "bevy")]
+    #[error("Bevy error: {0}")]
+    BevyError(#[from] LoadDirectError),
 }
 
 // this struct name has to match the auto-generated top-level struct.
 // Currently mirroring the LDTK Haxe API as best I can figure out.
 impl Project {
     pub fn new<P: AsRef<Path>>(f: P) -> Result<Self, LdtkError> {
-        Project::new_with_loader(f, default_loader)
-    }
-
-    pub fn new_with_loader<P: AsRef<Path>>(f: P, loader: Loader ) -> Result<Self, LdtkError> {
-        let mut o = Project::load_project_with_loader(&f, loader)?;
+        let mut o = Project::load_project(&f)?;
         if o.external_levels {
-            o.load_external_levels_with_loader(f, loader)?;
-        }
-        Ok(o)
-    }
-
-    pub async fn new_with_loader_async<P: AsRef<Path>>(f: P, loader: &AsyncLoader ) -> Result<Self, LdtkError> {
-        let mut o = Project::load_project_with_loader_async(&f, loader).await?;
-        if o.external_levels {
-            o.load_external_levels_with_loader_async(f, loader).await?;
+            o.load_external_levels(f)?;
         }
         Ok(o)
     }
 
     /// Read in an LDTK project file
     pub fn load_project<P: AsRef<Path>>(f: P) -> Result<Self, LdtkError> {
-        Project::load_project_with_loader(f, default_loader)
-    }
-
-    pub fn load_project_with_loader<P: AsRef<Path>>(f: P, loader: Loader) -> Result<Self, LdtkError> {
-        let file = loader(f.as_ref().into())?;
-        let o: Project = serde_json::from_reader(file)?;
-        Ok(o)
-    }
-
-    pub async fn load_project_with_loader_async<P: AsRef<Path>>(f: P, loader: &AsyncLoader) -> Result<Self, LdtkError> {
-        let file = loader(f.as_ref().into()).await?;
+        let file = BufReader::new(File::open(f)?);
         let o: Project = serde_json::from_reader(file)?;
         Ok(o)
     }
@@ -104,11 +88,6 @@ impl Project {
 
     /// Read in ALL the external level files referred to in an LDTK Project
     pub fn load_external_levels<P: AsRef<Path>>(&mut self, f: P) -> Result<(), LdtkError> {
-        self.load_external_levels_with_loader(f, default_loader)
-    }
-
-    /// Read in ALL the external level files referred to in an LDTK Project
-    pub fn load_external_levels_with_loader<P: AsRef<Path>>(&mut self, f: P, loader: Loader) -> Result<(), LdtkError> {
         // check to make sure there ARE separate levels
         // if not, then likely the call to this method
         // should do nothing because you already have
@@ -136,43 +115,7 @@ impl Project {
                 let mf = file.to_str()
                     .ok_or(LdtkError::PathToStringError())?;
                 full_path.push(format!("{parent}/{mf}"));
-                let level_ldtk = Level::new_with_loader(full_path, loader)?;
-                self.levels.push(level_ldtk);
-            }
-        }
-        Ok(())
-    }
-
-        /// Read in ALL the external level files referred to in an LDTK Project
-    pub async fn load_external_levels_with_loader_async<P: AsRef<Path>>(&mut self, f: P, loader: &AsyncLoader) -> Result<(), LdtkError> {
-        // check to make sure there ARE separate levels
-        // if not, then likely the call to this method
-        // should do nothing because you already have
-        // the levels.
-        if self.external_levels {
-            // get all the file names
-            let mut all_level_files: Vec<PathBuf> = Vec::new();
-            for level in self.levels.iter_mut() {
-                let level_file_path = level.external_rel_path.as_ref().ok_or(LdtkError::ExternalLevelNameNotFoundError)?;
-                all_level_files.push(level_file_path.into());
-            }
-
-            // get rid of existing levels (which don't have much data)
-            self.clear_levels();
-
-            // now add each of them to our struct
-            for file in all_level_files.iter() {
-                let mut full_path = PathBuf::new();
-                let parent = f
-                    .as_ref()
-                    .parent()
-                    .ok_or(LdtkError::PathToStringError())?
-                    .to_str()
-                    .ok_or(LdtkError::PathToStringError())?;
-                let mf = file.to_str()
-                    .ok_or(LdtkError::PathToStringError())?;
-                full_path.push(format!("{parent}/{mf}"));
-                let level_ldtk = Level::new_with_loader_async(full_path, loader).await?;
+                let level_ldtk = Level::new(full_path)?;
                 self.levels.push(level_ldtk);
             }
         }
@@ -192,19 +135,7 @@ impl Project {
 impl Level {
     /// Read in a single external LDTK level file
     pub fn new<P: AsRef<Path>>(f: P) -> Result<Self, LdtkError> {
-        Level::new_with_loader(f, default_loader)
-    }
-
-    /// Read in a single external LDTK level file
-    pub fn new_with_loader<P: AsRef<Path>>(f: P, loader: Loader) -> Result<Self, LdtkError> {
-        let file = loader(f.as_ref().into())?;
-        let o: Level = serde_json::from_reader(file)?;
-        Ok(o)
-    }
-
-    /// Read in a single external LDTK level file
-    pub async fn new_with_loader_async<P: AsRef<Path>>(f: P, loader: &AsyncLoader) -> Result<Self, LdtkError> {
-        let file = loader(f.as_ref().into()).await?;
+        let file = BufReader::new(File::open(f)?);
         let o: Level = serde_json::from_reader(file)?;
         Ok(o)
     }
